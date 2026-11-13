@@ -1,5 +1,5 @@
 /* Финансы — service worker for full offline support */
-const CACHE_NAME = 'finance-v6';
+const CACHE_NAME = 'finance-v7';
 
 /* App shell — everything needed to run the app offline.
    The app is a single self-contained index.html plus its icon and manifest. */
