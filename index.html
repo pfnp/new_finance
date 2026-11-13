@@ -100,6 +100,20 @@
         html { background:var(--bg); }
         body { display:flex; flex-direction:column; background-image:var(--bg-grad); background-attachment:fixed; }
         input, textarea, select { -webkit-user-select:text; user-select:text; font-family:var(--font); }
+        input[type="date"] {
+            -webkit-appearance: none;
+            appearance: none;
+            -webkit-user-select: auto;
+            user-select: auto;
+            min-height: 48px;
+            cursor: pointer;
+        }
+        input[type="date"]::-webkit-date-and-time-value { text-align:left; }
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            cursor: pointer;
+            opacity: 0.7;
+            padding: 4px;
+        }
         button { font-family:var(--font); }
 
         .app { flex:1; display:flex; flex-direction:column; height:100%; overflow:hidden; position:relative; max-width:760px; width:100%; margin:0 auto; }
@@ -643,9 +657,6 @@
                 e.stopPropagation();
                 const wid=btn.dataset.delwallet;
                 showConfirm('Удалить кошелёк? Связанные перемещения сохранятся.',()=>{
-                    // Удаляем только кошелёк. Перемещения (transfer) остаются в истории,
-                    // но так как walletId/toWalletId больше не соответствуют существующему
-                    // кошельку, деньги на нём "пропадают".
                     state.wallets=state.wallets.filter(w=>w.id!==wid);
                     persistAll(); renderHomePage(); sfxDelete();
                 });
@@ -882,6 +893,7 @@
             let html=`<div class="modal-handle"></div><div class="modal-title">Новый платёж</div>
             <input class="modal-input" id="pay-name" placeholder="Название" type="text">
             <input class="modal-input" id="pay-amount" placeholder="Сумма" type="number" step="any" inputmode="decimal">
+            <div class="field-label">Дата платежа</div>
             <input class="modal-input" id="pay-date" type="date" value="${todayStr()}">
             <button class="modal-btn primary" id="btn-save-pay">Добавить</button>
             <button class="modal-btn secondary" id="btn-cancel-pay">Отмена</button>`;
@@ -892,14 +904,17 @@
         function openEditPaymentModal(pid){
             const p=state.payments.find(x=>x.id===pid); if(!p)return;
             let html=`<div class="modal-handle"></div><div class="modal-title">Редактировать платёж</div>
+            <div class="field-label">Название</div>
             <input class="modal-input" id="e-pay-name" type="text" value="${escHtml(p.name)}">
+            <div class="field-label">Сумма</div>
             <input class="modal-input" id="e-pay-amount" type="number" step="any" inputmode="decimal" value="${p.amount}">
+            <div class="field-label">Дата платежа</div>
             <input class="modal-input" id="e-pay-date" type="date" value="${p.date}">
             <button class="modal-btn primary" id="btn-update-pay">Сохранить</button>
             <button class="modal-btn danger" id="btn-delete-pay">Удалить</button>
             <button class="modal-btn secondary" id="btn-cancel-edit-pay">Отмена</button>`;
             openModal(html);
-            $('#btn-update-pay').addEventListener('click',()=>{ p.name=$('#e-pay-name').value.trim()||p.name; p.amount=Math.abs(parseFloat($('#e-pay-amount').value)||p.amount); p.date=$('#e-pay-date').value||p.date; persistAll(); closeModal(); renderPaymentsPage(); sfxAdd(); scheduleNotificationCheck(); });
+            $('#btn-update-pay').addEventListener('click',()=>{ p.name=$('#e-pay-name').value.trim()||p.name; p.amount=Math.abs(parseFloat($('#e-pay-amount').value)||p.amount); const nd=$('#e-pay-date').value; if(nd) p.date=nd; persistAll(); closeModal(); renderPaymentsPage(); sfxAdd(); scheduleNotificationCheck(); });
             $('#btn-delete-pay').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить платёж?',()=>{ state.payments=state.payments.filter(x=>x.id!==pid); persistAll(); renderPaymentsPage(); sfxDelete(); scheduleNotificationCheck(); }); });
             $('#btn-cancel-edit-pay').addEventListener('click',closeModal);
         }
@@ -1060,43 +1075,72 @@
             $('#exp-json').addEventListener('click',()=>exportData('json',ops));
             $$('#analytics-body > .stack > .card:last-child .history-item').forEach(item=>item.addEventListener('click',()=>openEditOperationModal(item.dataset.opId,()=>renderAnalyticsData())));
             $('#show-all-ops')?.addEventListener('click',openFullHistory);
-            // свайп по круговой диаграмме
             attachDonutSwipe();
         }
 
         function attachDonutSwipe(){
             const holder = $('#donut-holder');
             if (!holder) return;
-            let startX = 0, startY = 0, tracking = false;
+            let startX = 0, startY = 0, tracking = false, horizontal = false;
+
             holder.addEventListener('touchstart', (e) => {
                 if (e.touches.length !== 1) return;
                 startX = e.touches[0].clientX;
                 startY = e.touches[0].clientY;
                 tracking = true;
+                horizontal = false;
             }, { passive: true });
+
+            holder.addEventListener('touchmove', (e) => {
+                if (!tracking) return;
+                const dx = e.touches[0].clientX - startX;
+                const dy = e.touches[0].clientY - startY;
+                if (!horizontal && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+                    horizontal = true;
+                }
+                if (horizontal && e.cancelable) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
             holder.addEventListener('touchend', (e) => {
                 if (!tracking) return;
                 tracking = false;
+                if (!horizontal) { horizontal = false; return; }
                 const t = e.changedTouches[0];
                 const dx = t.clientX - startX;
                 const dy = t.clientY - startY;
-                // горизонтальный свайп
-                if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+                if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
                     cyclePeriod(dx < 0 ? 1 : -1);
                 }
+                horizontal = false;
             }, { passive: true });
-            // для мыши на десктопе (по желанию)
+
+            holder.addEventListener('touchcancel', () => {
+                tracking = false; horizontal = false;
+            }, { passive: true });
+
             holder.addEventListener('mousedown', (e) => {
-                startX = e.clientX; startY = e.clientY; tracking = true;
+                startX = e.clientX; startY = e.clientY; tracking = true; horizontal = false;
             });
-            holder.addEventListener('mouseup', (e) => {
-                if (!tracking) return; tracking = false;
+            holder.addEventListener('mousemove', (e) => {
+                if (!tracking) return;
                 const dx = e.clientX - startX;
                 const dy = e.clientY - startY;
-                if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+                if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.2) horizontal = true;
+            });
+            holder.addEventListener('mouseup', (e) => {
+                if (!tracking) return;
+                tracking = false;
+                if (!horizontal) { horizontal = false; return; }
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
                     cyclePeriod(dx < 0 ? 1 : -1);
                 }
+                horizontal = false;
             });
+            holder.addEventListener('mouseleave', () => { tracking = false; horizontal = false; });
         }
         function cyclePeriod(direction){
             const a = state.analytics;
@@ -1361,7 +1405,7 @@
                 navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(()=>{});
             });
         }
-        console.log('[v0] Финансы — свайп диаграммы, период 30 дней, удаление кошелька без перемещений');
+        console.log('[v0] Финансы — исправлены дата платежа и свайп диаграммы');
     })();
     </script>
 </body>
