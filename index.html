@@ -282,7 +282,20 @@
         .donut-center .dc-label { font-size:11.5px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:0.8px; margin-top:2px; }
         .donut-holder { position:relative; display:flex; align-items:center; justify-content:center; touch-action:pan-y; }
         .donut-swipe-hint { font-size:11px; color:var(--text-3); text-align:center; margin-top:4px; user-select:none; }
-        .donut-period-shift { font-size:12px; font-weight:600; color:var(--accent); text-align:center; margin-top:2px; min-height:16px; }
+        .donut-period-title {
+            display:flex; align-items:center; justify-content:center; gap:8px;
+            font-size:13.5px; font-weight:700; color:var(--accent);
+            text-align:center; margin:6px 0 6px; letter-spacing:-0.1px;
+            padding:7px 12px; background:var(--accent-soft); border-radius:11px;
+        }
+        .period-reset-btn {
+            width:22px; height:22px; border-radius:50%; border:none;
+            background:var(--surface); color:var(--text-2);
+            font-size:14px; line-height:1; cursor:pointer;
+            display:flex; align-items:center; justify-content:center; padding:0;
+            flex-shrink:0;
+        }
+        .period-reset-btn:active { background:var(--accent); color:#fff; transform:scale(0.9); }
 
         .stat-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
         @media(min-width:480px){ .stat-grid{ grid-template-columns:repeat(4,1fr); } }
@@ -422,7 +435,6 @@
         function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
         function load(key,fallback){ try{ const raw=localStorage.getItem(key); return raw?JSON.parse(raw):fallback; }catch{ return fallback; } }
         function save(key,data){ try{ localStorage.setItem(key,JSON.stringify(data)); }catch{} }
-        // Собирает ISO из локальной даты YYYY-MM-DD и времени HH:MM
         function combineDateTime(dateStr, timeStr){
             if(!dateStr) return new Date().toISOString();
             const t = timeStr || '00:00';
@@ -431,6 +443,7 @@
         }
         function toLocalDateInput(iso){ const d=new Date(iso); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
         function toLocalTimeInput(iso){ const d=new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+        function fmtDayMonth(d){ return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); }
 
         let state = {
             wallets: load(STORAGE_KEYS.wallets, []),
@@ -912,7 +925,6 @@
 
         /* ========== PAYMENTS ========== */
         function paymentDateStr(p){
-            // дата+время для сортировки
             return p.date + 'T' + (p.time || '00:00') + ':00';
         }
         function renderPaymentsPage(){
@@ -996,7 +1008,6 @@
         }
 
         /* ========== ANALYTICS ========== */
-        // Возвращает {start, end} с учётом period и offset (offset=0 — текущий, 1 — прошлый и т.д.)
         function getDateRange(period, offset){
             offset = offset || 0;
             const now=new Date(); let start,end;
@@ -1028,20 +1039,47 @@
                 end=new Date(baseEnd); end.setDate(baseEnd.getDate()-len*offset);
             }
             else {
-                start=new Date(now.getFullYear(),now.getMonth(),1);
-                end=new Date(now.getFullYear(),now.getMonth()+1,0);
+                start=new Date(now.getFullYear(),now.getMonth()-offset,1);
+                end=new Date(start.getFullYear(),start.getMonth()+1,0);
             }
             start.setHours(0,0,0,0); end.setHours(23,59,59,999);
             return { start, end };
         }
-        // Возвращает человекочитаемое смещение, если offset>0
-        function offsetLabel(period, offset){
-            if(!offset) return '';
-            if(period==='today'){ return offset===1?'Вчера':`${offset} дн. назад`; }
-            if(period==='week'){ return offset===1?'Прошлая неделя':`${offset} нед. назад`; }
-            if(period==='month'){ return offset===1?'Прошлый месяц':`${offset} мес. назад`; }
-            if(period==='days30'){ return offset===1?'Предыдущие 30 дней':`${offset*30} дн. назад`; }
-            if(period==='custom'){ return offset===1?'Предыдущий период':`${offset} периодов назад`; }
+        function describePeriod(period, offset, start, end){
+            const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+            const absOffset = Math.abs(offset);
+            const isFuture = offset < 0;
+            if(period==='today'){
+                if(offset===0) return 'Сегодня · ' + fmtDayMonth(start);
+                if(offset===1) return 'Вчера · ' + fmtDayMonth(start);
+                if(offset>0) return absOffset + ' дн. назад · ' + fmtDayMonth(start);
+                return absOffset + ' дн. вперёд · ' + fmtDayMonth(start);
+            }
+            if(period==='week'){
+                const range = fmtDayMonth(start) + ' – ' + fmtDayMonth(end);
+                if(offset===0) return 'Эта неделя · ' + range;
+                if(offset===1) return 'Прошлая неделя · ' + range;
+                if(offset>0) return absOffset + ' нед. назад · ' + range;
+                return absOffset + ' нед. вперёд · ' + range;
+            }
+            if(period==='month'){
+                const name = monthNames[start.getMonth()] + ' ' + start.getFullYear();
+                if(offset===0) return name;
+                if(offset===1) return 'Прошлый месяц · ' + name;
+                if(offset>0) return absOffset + ' мес. назад · ' + name;
+                return absOffset + ' мес. вперёд · ' + name;
+            }
+            if(period==='days30'){
+                const range = fmtDayMonth(start) + ' – ' + fmtDayMonth(end);
+                if(offset===0) return 'Последние 30 дней · ' + range;
+                if(offset>0) return absOffset + '×30 дн. назад · ' + range;
+                return absOffset + '×30 дн. вперёд · ' + range;
+            }
+            if(period==='custom'){
+                const range = fmtDayMonth(start) + ' – ' + fmtDayMonth(end);
+                if(offset===0) return range;
+                return (offset>0 ? absOffset + ' пер. назад · ' : absOffset + ' пер. вперёд · ') + range;
+            }
             return '';
         }
         function getPrevRange(start,end){ const dur=end-start; const prevEnd=new Date(start.getTime()-1); const prevStart=new Date(start.getTime()-dur-1); return { start:prevStart, end:prevEnd }; }
@@ -1141,13 +1179,20 @@
             else if(diff>0) deltaClass=goodDown?'up':'down';
             else deltaClass=goodDown?'down':'up';
             const arrow=diff>0?'▲':(diff<0?'▼':'—');
-            const shiftLbl=offsetLabel(a.period, a.offset);
+            const periodLabel = describePeriod(a.period, a.offset, start, end);
+            const resetBtn = a.offset !== 0 ? `<button class="period-reset-btn" id="period-reset" title="Вернуться к текущему периоду" aria-label="Сбросить смещение">×</button>` : '';
             let html='<div class="stack">';
-            html+=`<div class="card animate-in"><div class="section-label" style="padding-left:0;">${typeWord} по категориям</div>
-                <div class="donut-wrap"><div class="donut-holder" id="donut-holder"><canvas class="donut-canvas" id="donut"></canvas>
-                <div class="donut-center"><div class="dc-sum">${fmtShort(total)} ₽</div><div class="dc-label">${typeWord}</div></div></div>
-                <div class="donut-period-shift">${shiftLbl || 'Текущий период'}</div>
-                <div class="donut-swipe-hint">← свайп для сдвига по датам →</div></div></div>`;
+            html+=`<div class="card animate-in">
+                <div class="section-label" style="padding-left:0;">${typeWord} по категориям</div>
+                <div class="donut-period-title">${periodLabel}${resetBtn}</div>
+                <div class="donut-wrap">
+                    <div class="donut-holder" id="donut-holder">
+                        <canvas class="donut-canvas" id="donut"></canvas>
+                        <div class="donut-center"><div class="dc-sum">${fmtShort(total)} ₽</div><div class="dc-label">${typeWord}</div></div>
+                    </div>
+                    <div class="donut-swipe-hint">← свайп для смены дат →</div>
+                </div>
+            </div>`;
             html+=`<div class="card compare-card animate-in">
                 <div class="cc-left"><div class="cc-title">Сравнение с пред. периодом</div><div class="cc-sum">${fmt(total)}</div><div class="cc-prev">Было: ${fmt(prevTotal)}</div></div>
                 <div class="delta-badge ${deltaClass}"><span>${arrow}</span><span>${diff===0?'0%':deltaSign+Math.abs(pct)+'%'}</span></div>
@@ -1190,6 +1235,11 @@
             $('#exp-json').addEventListener('click',()=>exportData('json',ops));
             $$('#analytics-body > .stack > .card:last-child .history-item').forEach(item=>item.addEventListener('click',()=>openEditOperationModal(item.dataset.opId,()=>renderAnalyticsData())));
             $('#show-all-ops')?.addEventListener('click',openFullHistory);
+            $('#period-reset')?.addEventListener('click',()=>{
+                state.analytics.offset = 0;
+                renderAnalyticsPage();
+                sfxSwitch();
+            });
             attachDonutSwipe();
         }
 
@@ -1257,12 +1307,11 @@
             });
             holder.addEventListener('mouseleave', () => { tracking = false; horizontal = false; });
         }
-        // direction: +1 = в прошлое (свайп влево), -1 = в будущее (свайп вправо, но не дальше 0)
+        // direction: +1 = в прошлое (свайп влево), -1 = в будущее (свайп вправо).
+        // Без ограничений в обе стороны — можно уходить как в прошлое, так и в будущее.
         function shiftAnalyticsPeriod(direction){
             const a = state.analytics;
-            const next = a.offset + direction;
-            if (next < 0) return; // не смотрим будущее
-            a.offset = next;
+            a.offset = a.offset + direction;
             renderAnalyticsPage();
             sfxSwitch();
         }
@@ -1519,7 +1568,7 @@
                 navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(()=>{});
             });
         }
-        console.log('[v0] Финансы — сдвиг периода свайпом, дата операции, дата+время платежа');
+        console.log('[v0] Финансы — свайп без ограничений, подпись периода над диаграммой');
     })();
     </script>
 </body>
