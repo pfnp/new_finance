@@ -100,7 +100,7 @@
         html { background:var(--bg); }
         body { display:flex; flex-direction:column; background-image:var(--bg-grad); background-attachment:fixed; }
         input, textarea, select { -webkit-user-select:text; user-select:text; font-family:var(--font); }
-        input[type="date"] {
+        input[type="date"], input[type="time"] {
             -webkit-appearance: none;
             appearance: none;
             -webkit-user-select: auto;
@@ -108,8 +108,10 @@
             min-height: 48px;
             cursor: pointer;
         }
-        input[type="date"]::-webkit-date-and-time-value { text-align:left; }
-        input[type="date"]::-webkit-calendar-picker-indicator {
+        input[type="date"]::-webkit-date-and-time-value,
+        input[type="time"]::-webkit-date-and-time-value { text-align:left; }
+        input[type="date"]::-webkit-calendar-picker-indicator,
+        input[type="time"]::-webkit-calendar-picker-indicator {
             cursor: pointer;
             opacity: 0.7;
             padding: 4px;
@@ -214,6 +216,8 @@
         .modal-btn.secondary { background:var(--surface-2); color:var(--text); }
         .modal-btn.secondary:active { transform:scale(0.97); opacity:0.85; }
         .btn-row { display:flex; gap:10px; }
+        .field-row { display:flex; gap:10px; }
+        .field-row > * { flex:1; min-width:0; }
 
         /* ---------- History items ---------- */
         .history-group-title { font-size:12px; font-weight:700; color:var(--text-3); text-transform:uppercase; letter-spacing:0.7px; padding:10px 4px 6px; }
@@ -278,6 +282,7 @@
         .donut-center .dc-label { font-size:11.5px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:0.8px; margin-top:2px; }
         .donut-holder { position:relative; display:flex; align-items:center; justify-content:center; touch-action:pan-y; }
         .donut-swipe-hint { font-size:11px; color:var(--text-3); text-align:center; margin-top:4px; user-select:none; }
+        .donut-period-shift { font-size:12px; font-weight:600; color:var(--accent); text-align:center; margin-top:2px; min-height:16px; }
 
         .stat-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
         @media(min-width:480px){ .stat-grid{ grid-template-columns:repeat(4,1fr); } }
@@ -409,12 +414,23 @@
         function fmtAxis(n){ const a=Math.abs(n); if(a>=1e6) return (n/1e6).toFixed(a>=1e7?0:1).replace('.0','')+'M'; if(a>=1e3) return (n/1e3).toFixed(a>=1e4?0:1).replace('.0','')+'K'; return String(Math.round(n)); }
         function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
         function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+        function nowTimeStr(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
         function formatDate(iso){ const d=new Date(iso); const now=new Date(); const today=new Date(now.getFullYear(),now.getMonth(),now.getDate()); const target=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const diff=(today-target)/864e5; if(diff===0) return 'Сегодня'; if(diff===1) return 'Вчера'; return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'}); }
+        function formatDateShort(iso){ const d=new Date(iso); return d.toLocaleDateString('ru-RU',{day:'numeric',month:'short'}); }
         function formatTime(iso){ return new Date(iso).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); }
         function escHtml(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
         function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
         function load(key,fallback){ try{ const raw=localStorage.getItem(key); return raw?JSON.parse(raw):fallback; }catch{ return fallback; } }
         function save(key,data){ try{ localStorage.setItem(key,JSON.stringify(data)); }catch{} }
+        // Собирает ISO из локальной даты YYYY-MM-DD и времени HH:MM
+        function combineDateTime(dateStr, timeStr){
+            if(!dateStr) return new Date().toISOString();
+            const t = timeStr || '00:00';
+            const d = new Date(dateStr + 'T' + t + ':00');
+            return d.toISOString();
+        }
+        function toLocalDateInput(iso){ const d=new Date(iso); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+        function toLocalTimeInput(iso){ const d=new Date(iso); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
         let state = {
             wallets: load(STORAGE_KEYS.wallets, []),
@@ -426,6 +442,7 @@
             analytics: {
                 type: 'expense',
                 period: 'month',
+                offset: 0,
                 customStart: null,
                 customEnd: null,
                 walletId: 'all',
@@ -522,17 +539,18 @@
             let anySent = false;
             state.payments.forEach(payment => {
                 const paymentDate = payment.date;
-                const notifyDate = new Date(paymentDate);
+                const notifyDate = new Date(paymentDate + 'T00:00:00');
                 notifyDate.setDate(notifyDate.getDate() - daysBefore);
-                const notifyDateStr = notifyDate.toISOString().slice(0,10);
+                const notifyDateStr = notifyDate.getFullYear()+'-'+String(notifyDate.getMonth()+1).padStart(2,'0')+'-'+String(notifyDate.getDate()).padStart(2,'0');
                 if (notifyDateStr === today) {
                     const key = `${payment.id}_${daysBefore}`;
                     if (!sentMap[key]) {
                         const title = `💰 Напоминание о платеже`;
                         let msg = '';
-                        if (daysBefore === 0) msg = `Сегодня платеж: ${payment.name} на сумму ${fmt(payment.amount)}`;
-                        else if (daysBefore === 1) msg = `Завтра платеж: ${payment.name} на сумму ${fmt(payment.amount)}`;
-                        else msg = `Через ${daysBefore} дня(ей) платеж: ${payment.name} на сумму ${fmt(payment.amount)}`;
+                        const timeSuffix = payment.time ? ` в ${payment.time}` : '';
+                        if (daysBefore === 0) msg = `Сегодня${timeSuffix} платеж: ${payment.name} на сумму ${fmt(payment.amount)}`;
+                        else if (daysBefore === 1) msg = `Завтра${timeSuffix} платеж: ${payment.name} на сумму ${fmt(payment.amount)}`;
+                        else msg = `Через ${daysBefore} дня(ей)${timeSuffix} платеж: ${payment.name} на сумму ${fmt(payment.amount)}`;
                         sendNtfyNotification(title, msg, 'high');
                         sentMap[key] = today;
                         anySent = true;
@@ -767,6 +785,11 @@
                 <select class="modal-input" id="op-to-wallet">${state.wallets.filter(w=>w.id!==walletId).map(w=>`<option value="${w.id}">${escHtml(w.name)}</option>`).join('')}</select>
             </div>
             <div id="op-cat-wrap">${categoryEditorMarkup()}</div>
+            <div class="field-label">Дата операции</div>
+            <div class="field-row">
+                <input class="modal-input" id="op-date" type="date" value="${todayStr()}">
+                <input class="modal-input" id="op-time" type="time" value="${nowTimeStr()}">
+            </div>
             <button class="modal-btn primary" id="btn-save-op">Добавить</button>
             <button class="modal-btn secondary" id="btn-cancel-op">Отмена</button>`;
             openModal(html);
@@ -796,14 +819,17 @@
             $('#btn-add-cat').addEventListener('click',()=>{ const inp=$('#new-cat-input'); const n=inp.value.trim(); if(n&&!cats[opType].includes(n)){ cats[opType].push(n); save(STORAGE_KEYS.categories,cats); inp.value=''; renderCats(); sfxAdd(); } });
             $('#btn-save-op').addEventListener('click',()=>{
                 const amount=parseFloat($('#op-amount').value); if(!amount||amount<=0){ $('#op-amount').focus(); return; }
+                const dateVal=$('#op-date').value || todayStr();
+                const timeVal=$('#op-time').value || nowTimeStr();
+                const isoDate=combineDateTime(dateVal, timeVal);
                 if(opType==='transfer'){
                     const toWalletId=$('#op-to-wallet')?.value;
                     if(!toWalletId||toWalletId===walletId){ return; }
-                    state.operations.push({id:uid(),walletId,type:'transfer',toWalletId,amount:Math.abs(amount),comment:$('#op-comment').value.trim(),date:new Date().toISOString(),exclAnalytics:true});
+                    state.operations.push({id:uid(),walletId,type:'transfer',toWalletId,amount:Math.abs(amount),comment:$('#op-comment').value.trim(),date:isoDate,exclAnalytics:true});
                 } else {
                     const comment=$('#op-comment').value.trim();
                     const sel=$('#cat-list .chip.selected'); const category=sel?sel.dataset.cat:(cats[opType][0]||'Другое');
-                    state.operations.push({id:uid(),walletId,type:opType,amount:Math.abs(amount),category,comment,date:new Date().toISOString()});
+                    state.operations.push({id:uid(),walletId,type:opType,amount:Math.abs(amount),category,comment,date:isoDate});
                 }
                 persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
             });
@@ -813,6 +839,8 @@
             const op=state.operations.find(o=>o.id===opId); if(!op)return;
             const isTransfer=op.type==='transfer';
             const cats=state.categories; let opType=op.type;
+            const curDate=toLocalDateInput(op.date);
+            const curTime=toLocalTimeInput(op.date);
             let html=`<div class="modal-handle"></div><div class="modal-title">Редактировать</div>
             <div class="field-label" style="color:var(--text-3);">${escHtml(walletName(op.walletId))}${isTransfer?' → '+escHtml(walletName(op.toWalletId)):''}</div>`;
             if(isTransfer){
@@ -820,6 +848,11 @@
                 <input class="modal-input" id="e-comment" placeholder="Комментарий" type="text" value="${escHtml(op.comment||'')}">
                 <div class="field-label">Перевести в</div>
                 <select class="modal-input" id="e-to-wallet">${state.wallets.filter(w=>w.id!==op.walletId).map(w=>`<option value="${w.id}"${w.id===op.toWalletId?' selected':''}>${escHtml(w.name)}</option>`).join('')}</select>
+                <div class="field-label">Дата операции</div>
+                <div class="field-row">
+                    <input class="modal-input" id="e-date" type="date" value="${curDate}">
+                    <input class="modal-input" id="e-time" type="time" value="${curTime}">
+                </div>
                 <button class="modal-btn primary" id="btn-update-op">Сохранить</button>
                 <button class="modal-btn danger" id="btn-delete-op">Удалить операцию</button>
                 <button class="modal-btn secondary" id="btn-cancel-edit">Отмена</button>`;
@@ -829,6 +862,9 @@
                     op.amount=Math.abs(a);
                     op.comment=$('#e-comment').value.trim();
                     const to=$('#e-to-wallet').value; if(to) op.toWalletId=to;
+                    const d=$('#e-date').value || curDate;
+                    const t=$('#e-time').value || curTime;
+                    op.date=combineDateTime(d,t);
                     persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
                 });
                 $('#btn-delete-op').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить операцию?',()=>{ state.operations=state.operations.filter(o=>o.id!==opId); persistAll(); onSaved&&onSaved(); sfxDelete(); }); });
@@ -839,6 +875,11 @@
             <input class="modal-input" id="e-amount" type="number" step="any" inputmode="decimal" value="${op.amount}">
             <input class="modal-input" id="e-comment" placeholder="Комментарий" type="text" value="${escHtml(op.comment||'')}">
             <div class="field-label">Категория</div><div class="chip-row" id="e-cat-list"></div>
+            <div class="field-label">Дата операции</div>
+            <div class="field-row">
+                <input class="modal-input" id="e-date" type="date" value="${curDate}">
+                <input class="modal-input" id="e-time" type="time" value="${curTime}">
+            </div>
             <button class="modal-btn primary" id="btn-update-op">Сохранить</button>
             <button class="modal-btn danger" id="btn-delete-op">Удалить операцию</button>
             <button class="modal-btn secondary" id="btn-cancel-edit">Отмена</button>`;
@@ -848,7 +889,15 @@
             const bi=$('#e-income'), be=$('#e-expense');
             bi.addEventListener('click',()=>{ opType='income'; bi.className='on-income'; be.className=''; renderCats(); });
             be.addEventListener('click',()=>{ opType='expense'; be.className='on-expense'; bi.className=''; renderCats(); });
-            $('#btn-update-op').addEventListener('click',()=>{ const a=parseFloat($('#e-amount').value); if(!a||a<=0){ $('#e-amount').focus(); return; } op.amount=Math.abs(a); op.type=opType; op.comment=$('#e-comment').value.trim(); const sel=$('#e-cat-list .chip.selected'); if(sel)op.category=sel.dataset.cat; persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd(); });
+            $('#btn-update-op').addEventListener('click',()=>{
+                const a=parseFloat($('#e-amount').value); if(!a||a<=0){ $('#e-amount').focus(); return; }
+                op.amount=Math.abs(a); op.type=opType; op.comment=$('#e-comment').value.trim();
+                const sel=$('#e-cat-list .chip.selected'); if(sel)op.category=sel.dataset.cat;
+                const d=$('#e-date').value || curDate;
+                const t=$('#e-time').value || curTime;
+                op.date=combineDateTime(d,t);
+                persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
+            });
             $('#btn-delete-op').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить операцию?',()=>{ state.operations=state.operations.filter(o=>o.id!==opId); persistAll(); onSaved&&onSaved(); sfxDelete(); }); });
             $('#btn-cancel-edit').addEventListener('click',closeModal);
         }
@@ -862,10 +911,14 @@
         }
 
         /* ========== PAYMENTS ========== */
+        function paymentDateStr(p){
+            // дата+время для сортировки
+            return p.date + 'T' + (p.time || '00:00') + ':00';
+        }
         function renderPaymentsPage(){
             const content=$('#content-payments'); if(!content)return;
             const now=new Date(), tStr=todayStr();
-            const sorted=[...state.payments].sort((a,b)=>new Date(a.date)-new Date(b.date));
+            const sorted=[...state.payments].sort((a,b)=>new Date(paymentDateStr(a))-new Date(paymentDateStr(b)));
             const upcoming=sorted.filter(p=>p.date>=tStr);
             const upTotal=upcoming.reduce((s,p)=>s+p.amount,0);
             let html=`<div class="stack"><div class="card summary-card animate-in">
@@ -877,10 +930,13 @@
             else{
                 html+=`<div class="section-label">Все платежи</div>`;
                 sorted.forEach(p=>{
-                    const pDate=new Date(p.date); const diff=Math.ceil((pDate-new Date(now.getFullYear(),now.getMonth(),now.getDate()))/864e5);
+                    const pDate=new Date(p.date + 'T00:00:00');
+                    const today0=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+                    const diff=Math.ceil((pDate-today0)/864e5);
                     let sc='upcoming', stxt=`Через ${diff} дн.`;
                     if(diff<0){ sc='overdue'; stxt='Просрочено'; } else if(diff===0){ sc='today'; stxt='Сегодня'; } else if(diff===1){ sc='tomorrow'; stxt='Завтра'; }
-                    html+=`<div class="payment-item animate-in" data-payment-id="${p.id}"><div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:14.5px;">${escHtml(p.name)}</div><div style="font-size:12px;color:var(--text-3);margin-top:2px;">${formatDate(p.date)}</div></div><span class="payment-status ${sc}">${stxt}</span><span style="font-weight:800;font-size:15px;white-space:nowrap;">${fmt(p.amount)}</span></div>`;
+                    const timeLabel = p.time ? ` · ${p.time}` : '';
+                    html+=`<div class="payment-item animate-in" data-payment-id="${p.id}"><div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:14.5px;">${escHtml(p.name)}</div><div style="font-size:12px;color:var(--text-3);margin-top:2px;">${formatDate(p.date+'T00:00:00')}${timeLabel}</div></div><span class="payment-status ${sc}">${stxt}</span><span style="font-weight:800;font-size:15px;white-space:nowrap;">${fmt(p.amount)}</span></div>`;
                 });
             }
             html+=`</div>`;
@@ -894,11 +950,22 @@
             <input class="modal-input" id="pay-name" placeholder="Название" type="text">
             <input class="modal-input" id="pay-amount" placeholder="Сумма" type="number" step="any" inputmode="decimal">
             <div class="field-label">Дата платежа</div>
-            <input class="modal-input" id="pay-date" type="date" value="${todayStr()}">
+            <div class="field-row">
+                <input class="modal-input" id="pay-date" type="date" value="${todayStr()}">
+                <input class="modal-input" id="pay-time" type="time" value="${nowTimeStr()}">
+            </div>
             <button class="modal-btn primary" id="btn-save-pay">Добавить</button>
             <button class="modal-btn secondary" id="btn-cancel-pay">Отмена</button>`;
             openModal(html);
-            $('#btn-save-pay').addEventListener('click',()=>{ const name=$('#pay-name').value.trim(); const amount=parseFloat($('#pay-amount').value); const date=$('#pay-date').value; if(!name||!amount||amount<=0||!date){ return; } state.payments.push({id:uid(),name,amount:Math.abs(amount),date,createdAt:new Date().toISOString()}); persistAll(); closeModal(); renderPaymentsPage(); sfxAdd(); scheduleNotificationCheck(); });
+            $('#btn-save-pay').addEventListener('click',()=>{
+                const name=$('#pay-name').value.trim();
+                const amount=parseFloat($('#pay-amount').value);
+                const date=$('#pay-date').value || todayStr();
+                const time=$('#pay-time').value || nowTimeStr();
+                if(!name||!amount||amount<=0){ return; }
+                state.payments.push({id:uid(),name,amount:Math.abs(amount),date,time,createdAt:new Date().toISOString()});
+                persistAll(); closeModal(); renderPaymentsPage(); sfxAdd(); scheduleNotificationCheck();
+            });
             $('#btn-cancel-pay').addEventListener('click',closeModal);
         }
         function openEditPaymentModal(pid){
@@ -908,28 +975,74 @@
             <input class="modal-input" id="e-pay-name" type="text" value="${escHtml(p.name)}">
             <div class="field-label">Сумма</div>
             <input class="modal-input" id="e-pay-amount" type="number" step="any" inputmode="decimal" value="${p.amount}">
-            <div class="field-label">Дата платежа</div>
-            <input class="modal-input" id="e-pay-date" type="date" value="${p.date}">
+            <div class="field-label">Дата и время платежа</div>
+            <div class="field-row">
+                <input class="modal-input" id="e-pay-date" type="date" value="${p.date}">
+                <input class="modal-input" id="e-pay-time" type="time" value="${p.time||'00:00'}">
+            </div>
             <button class="modal-btn primary" id="btn-update-pay">Сохранить</button>
             <button class="modal-btn danger" id="btn-delete-pay">Удалить</button>
             <button class="modal-btn secondary" id="btn-cancel-edit-pay">Отмена</button>`;
             openModal(html);
-            $('#btn-update-pay').addEventListener('click',()=>{ p.name=$('#e-pay-name').value.trim()||p.name; p.amount=Math.abs(parseFloat($('#e-pay-amount').value)||p.amount); const nd=$('#e-pay-date').value; if(nd) p.date=nd; persistAll(); closeModal(); renderPaymentsPage(); sfxAdd(); scheduleNotificationCheck(); });
+            $('#btn-update-pay').addEventListener('click',()=>{
+                p.name=$('#e-pay-name').value.trim()||p.name;
+                p.amount=Math.abs(parseFloat($('#e-pay-amount').value)||p.amount);
+                const nd=$('#e-pay-date').value; if(nd) p.date=nd;
+                const nt=$('#e-pay-time').value; if(nt) p.time=nt;
+                persistAll(); closeModal(); renderPaymentsPage(); sfxAdd(); scheduleNotificationCheck();
+            });
             $('#btn-delete-pay').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить платёж?',()=>{ state.payments=state.payments.filter(x=>x.id!==pid); persistAll(); renderPaymentsPage(); sfxDelete(); scheduleNotificationCheck(); }); });
             $('#btn-cancel-edit-pay').addEventListener('click',closeModal);
         }
 
         /* ========== ANALYTICS ========== */
-        function getDateRange(period){
-            const now=new Date(); let start,end=new Date();
-            if(period==='today'){ start=new Date(now.getFullYear(),now.getMonth(),now.getDate()); }
-            else if(period==='week'){ const day=now.getDay(); const diff=now.getDate()-day+(day===0?-6:1); start=new Date(now.getFullYear(),now.getMonth(),diff); }
-            else if(period==='month'){ start=new Date(now.getFullYear(),now.getMonth(),1); }
-            else if(period==='days30'){ start=new Date(now.getTime()-29*864e5); }
-            else if(period==='custom'){ start=state.analytics.customStart?new Date(state.analytics.customStart):new Date(now.getFullYear(),now.getMonth(),1); end=state.analytics.customEnd?new Date(state.analytics.customEnd):new Date(); }
-            else start=new Date(now.getFullYear(),now.getMonth(),1);
+        // Возвращает {start, end} с учётом period и offset (offset=0 — текущий, 1 — прошлый и т.д.)
+        function getDateRange(period, offset){
+            offset = offset || 0;
+            const now=new Date(); let start,end;
+            if(period==='today'){
+                start=new Date(now.getFullYear(),now.getMonth(),now.getDate()-offset);
+                end=new Date(start);
+            }
+            else if(period==='week'){
+                const day=now.getDay();
+                const diff=now.getDate()-day+(day===0?-6:1);
+                const baseStart=new Date(now.getFullYear(),now.getMonth(),diff);
+                start=new Date(baseStart); start.setDate(baseStart.getDate()-7*offset);
+                end=new Date(start); end.setDate(start.getDate()+6);
+            }
+            else if(period==='month'){
+                start=new Date(now.getFullYear(),now.getMonth()-offset,1);
+                end=new Date(start.getFullYear(),start.getMonth()+1,0);
+            }
+            else if(period==='days30'){
+                end=new Date(now.getTime()-offset*30*864e5);
+                start=new Date(end.getTime()-29*864e5);
+            }
+            else if(period==='custom'){
+                const a=state.analytics;
+                const baseStart=a.customStart?new Date(a.customStart):new Date(now.getFullYear(),now.getMonth(),1);
+                const baseEnd=a.customEnd?new Date(a.customEnd):new Date();
+                const len=Math.max(1, Math.round((baseEnd-baseStart)/864e5)+1);
+                start=new Date(baseStart); start.setDate(baseStart.getDate()-len*offset);
+                end=new Date(baseEnd); end.setDate(baseEnd.getDate()-len*offset);
+            }
+            else {
+                start=new Date(now.getFullYear(),now.getMonth(),1);
+                end=new Date(now.getFullYear(),now.getMonth()+1,0);
+            }
             start.setHours(0,0,0,0); end.setHours(23,59,59,999);
             return { start, end };
+        }
+        // Возвращает человекочитаемое смещение, если offset>0
+        function offsetLabel(period, offset){
+            if(!offset) return '';
+            if(period==='today'){ return offset===1?'Вчера':`${offset} дн. назад`; }
+            if(period==='week'){ return offset===1?'Прошлая неделя':`${offset} нед. назад`; }
+            if(period==='month'){ return offset===1?'Прошлый месяц':`${offset} мес. назад`; }
+            if(period==='days30'){ return offset===1?'Предыдущие 30 дней':`${offset*30} дн. назад`; }
+            if(period==='custom'){ return offset===1?'Предыдущий период':`${offset} периодов назад`; }
+            return '';
         }
         function getPrevRange(start,end){ const dur=end-start; const prevEnd=new Date(start.getTime()-1); const prevStart=new Date(start.getTime()-dur-1); return { start:prevStart, end:prevEnd }; }
         function filterOps(typeMatch,start,end){
@@ -972,8 +1085,8 @@
             content.innerHTML=html;
             $('#an-expense').addEventListener('click',()=>{ a.type='expense'; a.categories=[]; renderAnalyticsPage(); });
             $('#an-income').addEventListener('click',()=>{ a.type='income'; a.categories=[]; renderAnalyticsPage(); });
-            $$('.period-btn',content).forEach(btn=>btn.addEventListener('click',()=>{ a.period=btn.dataset.period; renderAnalyticsPage(); }));
-            $('#c-apply')?.addEventListener('click',()=>{ a.customStart=$('#c-start').value||null; a.customEnd=$('#c-end').value||null; renderAnalyticsData(); });
+            $$('.period-btn',content).forEach(btn=>btn.addEventListener('click',()=>{ a.period=btn.dataset.period; a.offset=0; renderAnalyticsPage(); }));
+            $('#c-apply')?.addEventListener('click',()=>{ a.customStart=$('#c-start').value||null; a.customEnd=$('#c-end').value||null; a.offset=0; renderAnalyticsData(); });
             $('#filter-wallet').addEventListener('click',openWalletFilter);
             $('#filter-category').addEventListener('click',openCategoryFilter);
             renderAnalyticsData();
@@ -1004,7 +1117,7 @@
 
         function renderAnalyticsData(){
             const a=state.analytics;
-            const { start, end } = getDateRange(a.period);
+            const { start, end } = getDateRange(a.period, a.offset);
             const ops=filterOps(true,start,end);
             const prev=getPrevRange(start,end);
             const prevOps=filterOps(true,prev.start,prev.end);
@@ -1028,11 +1141,13 @@
             else if(diff>0) deltaClass=goodDown?'up':'down';
             else deltaClass=goodDown?'down':'up';
             const arrow=diff>0?'▲':(diff<0?'▼':'—');
+            const shiftLbl=offsetLabel(a.period, a.offset);
             let html='<div class="stack">';
             html+=`<div class="card animate-in"><div class="section-label" style="padding-left:0;">${typeWord} по категориям</div>
                 <div class="donut-wrap"><div class="donut-holder" id="donut-holder"><canvas class="donut-canvas" id="donut"></canvas>
                 <div class="donut-center"><div class="dc-sum">${fmtShort(total)} ₽</div><div class="dc-label">${typeWord}</div></div></div>
-                <div class="donut-swipe-hint">← свайп для смены периода →</div></div></div>`;
+                <div class="donut-period-shift">${shiftLbl || 'Текущий период'}</div>
+                <div class="donut-swipe-hint">← свайп для сдвига по датам →</div></div></div>`;
             html+=`<div class="card compare-card animate-in">
                 <div class="cc-left"><div class="cc-title">Сравнение с пред. периодом</div><div class="cc-sum">${fmt(total)}</div><div class="cc-prev">Было: ${fmt(prevTotal)}</div></div>
                 <div class="delta-badge ${deltaClass}"><span>${arrow}</span><span>${diff===0?'0%':deltaSign+Math.abs(pct)+'%'}</span></div>
@@ -1111,7 +1226,7 @@
                 const dx = t.clientX - startX;
                 const dy = t.clientY - startY;
                 if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
-                    cyclePeriod(dx < 0 ? 1 : -1);
+                    shiftAnalyticsPeriod(dx < 0 ? 1 : -1);
                 }
                 horizontal = false;
             }, { passive: true });
@@ -1136,19 +1251,18 @@
                 const dx = e.clientX - startX;
                 const dy = e.clientY - startY;
                 if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
-                    cyclePeriod(dx < 0 ? 1 : -1);
+                    shiftAnalyticsPeriod(dx < 0 ? 1 : -1);
                 }
                 horizontal = false;
             });
             holder.addEventListener('mouseleave', () => { tracking = false; horizontal = false; });
         }
-        function cyclePeriod(direction){
+        // direction: +1 = в прошлое (свайп влево), -1 = в будущее (свайп вправо, но не дальше 0)
+        function shiftAnalyticsPeriod(direction){
             const a = state.analytics;
-            const idx = PERIODS.findIndex(p => p.id === a.period);
-            let next = idx + direction;
-            if (next < 0) next = PERIODS.length - 1;
-            if (next >= PERIODS.length) next = 0;
-            a.period = PERIODS[next].id;
+            const next = a.offset + direction;
+            if (next < 0) return; // не смотрим будущее
+            a.offset = next;
             renderAnalyticsPage();
             sfxSwitch();
         }
@@ -1377,7 +1491,7 @@
             else if(t.id==='btn-add-wallet') openAddWalletModal();
             else if(t.id==='btn-add-payment') openAddPaymentModal();
             else if(t.id==='btn-notify-settings') openNotifySettingsModal();
-            else if(t.id==='btn-export-analytics'){ const {start,end}=getDateRange(state.analytics.period); openExportMenu(filterOps(true,start,end)); }
+            else if(t.id==='btn-export-analytics'){ const {start,end}=getDateRange(state.analytics.period, state.analytics.offset); openExportMenu(filterOps(true,start,end)); }
         });
         function openExportMenu(ops){
             let html=`<div class="modal-handle"></div><div class="modal-title">Экспорт</div><div class="field-label">${ops.length} операций за выбранный период</div>
@@ -1405,7 +1519,7 @@
                 navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(()=>{});
             });
         }
-        console.log('[v0] Финансы — исправлены дата платежа и свайп диаграммы');
+        console.log('[v0] Финансы — сдвиг периода свайпом, дата операции, дата+время платежа');
     })();
     </script>
 </body>
