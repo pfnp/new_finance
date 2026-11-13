@@ -147,7 +147,8 @@
         .summary-card .summary-label { font-size:12px; font-weight:600; letter-spacing:1.4px; text-transform:uppercase; opacity:0.72; position:relative; }
         .summary-card .summary-balance { font-size:38px; font-weight:800; letter-spacing:-1px; margin:6px 0 12px; position:relative; line-height:1; }
         .summary-pills { display:flex; gap:10px; position:relative; flex-wrap:wrap; }
-        .summary-pill { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.16); border-radius:14px; padding:8px 12px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; backdrop-filter:blur(6px); }
+        .summary-pill { background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.16); border-radius:14px; padding:8px 12px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; backdrop-filter:blur(6px); cursor:pointer; transition:transform var(--t), background var(--t); -webkit-user-select:none; user-select:none; }
+        .summary-pill:active { transform:scale(0.94); background:rgba(255,255,255,0.2); }
         .summary-pill .dot { width:8px; height:8px; border-radius:50%; }
         .summary-pill .dot.in { background:#5be08a; }
         .summary-pill .dot.out { background:#ff8585; }
@@ -516,6 +517,10 @@
             else if(state.currentPage==='analytics') renderAnalyticsPage();
             else if(state.currentPage==='payments') renderPaymentsPage();
         }
+        // После изменения операций/кошельков — обновляем текущую страницу.
+        function refreshAfterOpChange(){
+            renderCurrentPage();
+        }
 
         /* ---------- NOTIFICATIONS via ntfy ---------- */
         async function sendNtfyNotification(title, message, priority='default') {
@@ -670,8 +675,8 @@
                     <div class="summary-label">Общий баланс</div>
                     <div class="summary-balance">${fmt(total)}</div>
                     <div class="summary-pills">
-                        <span class="summary-pill"><span class="dot in"></span>Доход ${fmt(inc)}</span>
-                        <span class="summary-pill"><span class="dot out"></span>Расход ${fmt(exp)}</span>
+                        <span class="summary-pill" data-nav-type="income" role="button" aria-label="Аналитика доходов за месяц"><span class="dot in"></span>Доход ${fmt(inc)}</span>
+                        <span class="summary-pill" data-nav-type="expense" role="button" aria-label="Аналитика расходов за месяц"><span class="dot out"></span>Расход ${fmt(exp)}</span>
                     </div>
                 </div>`;
             const sorted=sortWallets(state.wallets);
@@ -689,8 +694,20 @@
                 const wid=btn.dataset.delwallet;
                 showConfirm('Удалить кошелёк? Связанные перемещения сохранятся.',()=>{
                     state.wallets=state.wallets.filter(w=>w.id!==wid);
-                    persistAll(); renderHomePage(); sfxDelete();
+                    persistAll(); refreshAfterOpChange(); sfxDelete();
                 });
+            }));
+            // Клик по "Доход"/"Расход" — переход в аналитику за текущий месяц
+            $$('.summary-pill',content).forEach(pill=>pill.addEventListener('click',()=>{
+                const type = pill.dataset.navType;
+                if(!type) return;
+                const a = state.analytics;
+                a.type = type;
+                a.period = 'month';
+                a.offset = 0;
+                a.categories = [];
+                a.walletId = 'all';
+                switchPage('analytics');
             }));
         }
 
@@ -743,7 +760,7 @@
                 if(diff===0){ closeModal(); onSaved&&onSaved(); return; }
                 const type=diff>0?'income':'expense';
                 state.operations.push({id:uid(),walletId,type,amount:Math.abs(diff),category:'Корректировка',comment:'Корректировка баланса',date:new Date().toISOString(),exclAnalytics:true});
-                persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
+                persistAll(); closeModal(); onSaved&&onSaved(); refreshAfterOpChange(); sfxAdd();
             });
             $('#btn-cancel-adj').addEventListener('click',closeModal);
         }
@@ -774,7 +791,7 @@
                 if(wtype==='invest') wallet.monthlyIncome=parseFloat($('#wallet-income-input').value)||0;
                 if(sum!==0&&wtype!=='debt') state.operations.push({id:uid(),walletId:wallet.id,type:'income',amount:Math.abs(sum),category:'Начальный баланс',comment:'Начальный баланс',date:new Date().toISOString(),exclAnalytics:true});
                 if(wtype==='debt'&&sum!==0){ const t=sum>0?'income':'expense'; state.operations.push({id:uid(),walletId:wallet.id,type:t,amount:Math.abs(sum),category:t==='income'?'Долг мне':'Мой долг',comment:'Начальный долг',date:new Date().toISOString(),exclAnalytics:true}); }
-                state.wallets.push(wallet); persistAll(); closeModal(); renderHomePage(); sfxAdd();
+                state.wallets.push(wallet); persistAll(); closeModal(); refreshAfterOpChange(); sfxAdd();
             });
             $('#btn-cancel-modal').addEventListener('click',closeModal);
         }
@@ -844,7 +861,7 @@
                     const sel=$('#cat-list .chip.selected'); const category=sel?sel.dataset.cat:(cats[opType][0]||'Другое');
                     state.operations.push({id:uid(),walletId,type:opType,amount:Math.abs(amount),category,comment,date:isoDate});
                 }
-                persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
+                persistAll(); closeModal(); onSaved&&onSaved(); refreshAfterOpChange(); sfxAdd();
             });
             $('#btn-cancel-op').addEventListener('click',closeModal);
         }
@@ -878,9 +895,9 @@
                     const d=$('#e-date').value || curDate;
                     const t=$('#e-time').value || curTime;
                     op.date=combineDateTime(d,t);
-                    persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
+                    persistAll(); closeModal(); onSaved&&onSaved(); refreshAfterOpChange(); sfxAdd();
                 });
-                $('#btn-delete-op').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить операцию?',()=>{ state.operations=state.operations.filter(o=>o.id!==opId); persistAll(); onSaved&&onSaved(); sfxDelete(); }); });
+                $('#btn-delete-op').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить операцию?',()=>{ state.operations=state.operations.filter(o=>o.id!==opId); persistAll(); onSaved&&onSaved(); refreshAfterOpChange(); sfxDelete(); }); });
                 $('#btn-cancel-edit').addEventListener('click',closeModal);
                 return;
             }
@@ -909,9 +926,9 @@
                 const d=$('#e-date').value || curDate;
                 const t=$('#e-time').value || curTime;
                 op.date=combineDateTime(d,t);
-                persistAll(); closeModal(); onSaved&&onSaved(); sfxAdd();
+                persistAll(); closeModal(); onSaved&&onSaved(); refreshAfterOpChange(); sfxAdd();
             });
-            $('#btn-delete-op').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить операцию?',()=>{ state.operations=state.operations.filter(o=>o.id!==opId); persistAll(); onSaved&&onSaved(); sfxDelete(); }); });
+            $('#btn-delete-op').addEventListener('click',()=>{ closeModal(); showConfirm('Удалить операцию?',()=>{ state.operations=state.operations.filter(o=>o.id!==opId); persistAll(); onSaved&&onSaved(); refreshAfterOpChange(); sfxDelete(); }); });
             $('#btn-cancel-edit').addEventListener('click',closeModal);
         }
 
@@ -1048,7 +1065,6 @@
         function describePeriod(period, offset, start, end){
             const monthNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
             const absOffset = Math.abs(offset);
-            const isFuture = offset < 0;
             if(period==='today'){
                 if(offset===0) return 'Сегодня · ' + fmtDayMonth(start);
                 if(offset===1) return 'Вчера · ' + fmtDayMonth(start);
@@ -1190,7 +1206,7 @@
                         <canvas class="donut-canvas" id="donut"></canvas>
                         <div class="donut-center"><div class="dc-sum">${fmtShort(total)} ₽</div><div class="dc-label">${typeWord}</div></div>
                     </div>
-                    <div class="donut-swipe-hint">← свайп для смены дат →</div>
+                    <div class="donut-swipe-hint">← новее · свайп · старее →</div>
                 </div>
             </div>`;
             html+=`<div class="card compare-card animate-in">
@@ -1276,7 +1292,8 @@
                 const dx = t.clientX - startX;
                 const dy = t.clientY - startY;
                 if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
-                    shiftAnalyticsPeriod(dx < 0 ? 1 : -1);
+                    // Свайп слева направо (dx>0) — старее; справа налево (dx<0) — новее.
+                    shiftAnalyticsPeriod(dx > 0 ? 1 : -1);
                 }
                 horizontal = false;
             }, { passive: true });
@@ -1301,13 +1318,13 @@
                 const dx = e.clientX - startX;
                 const dy = e.clientY - startY;
                 if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
-                    shiftAnalyticsPeriod(dx < 0 ? 1 : -1);
+                    shiftAnalyticsPeriod(dx > 0 ? 1 : -1);
                 }
                 horizontal = false;
             });
             holder.addEventListener('mouseleave', () => { tracking = false; horizontal = false; });
         }
-        // direction: +1 = в прошлое (свайп влево), -1 = в будущее (свайп вправо).
+        // direction: +1 = старее (свайп вправо), -1 = новее (свайп влево).
         // Без ограничений в обе стороны — можно уходить как в прошлое, так и в будущее.
         function shiftAnalyticsPeriod(direction){
             const a = state.analytics;
@@ -1568,7 +1585,7 @@
                 navigator.serviceWorker.register('./sw.js',{scope:'./'}).catch(()=>{});
             });
         }
-        console.log('[v0] Финансы — свайп без ограничений, подпись периода над диаграммой');
+        console.log('[v0] Финансы — новое направление свайпа, клики по доход/расход, автообновление');
     })();
     </script>
 </body>
